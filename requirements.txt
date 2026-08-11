@@ -1,0 +1,25 @@
+# Broker API 
+smartapi-python==1.5.5      
+logzero==1.7.0
+websocket-client==1.8.0
+pyotp==2.9.0                  
+
+# Data & ML 
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.5.1
+joblib==1.4.2
+
+# GUI 
+PySide6==6.7.2
+
+# AI Explanation (Groq) 
+groq==0.9.0
+httpx==0.27.2
+
+# Utilities 
+python-dotenv==1.0.1
+
+# Packaging 
+pyinstaller==6.10.0
+xgboost==2.1.1
