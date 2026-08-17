@@ -1,5 +1,6 @@
 import time
 import pyotp
+import sys
 import pandas as pd
 import joblib
 import os
@@ -12,6 +13,14 @@ from config import config
 
 socket.setdefaulttimeout(20)
 
+def resource_path(relative_path):
+    """PyInstaller bundled mode aur normal mode dono mein sahi path deta hai"""
+    if hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 _obj = None
 _model = None
 _groq_client = None
@@ -19,6 +28,19 @@ _groq_client = None
 _candle_cache = {}
 _cache_dirty_count = 0
 CACHE_FILE = "candle_cache.pkl"
+LIVE_LOG_FILE = "live_predictions_log.csv"
+
+# Tracks (symbol, crossover_ts) pairs already logged this session, so an
+# unchanged crossover doesn't get re-logged as a "new" row every refresh
+# cycle - find_latest_crossover() keeps returning the SAME crossover until
+# a genuinely new one occurs, so without this guard the log fills with
+# duplicates that silently skew aggregate accuracy calculations.
+# Note: this resets on process restart (in-memory, not persisted to disk) -
+# acceptable for now, since re-logging after a restart just adds a few
+# duplicate rows rather than corrupting results, and resolve_predictions.py's
+# dedup-by-(symbol, crossover_ts) step at analysis time catches any that slip
+# through regardless.
+_logged_crossovers = set()
 
 def load_cache_from_disk():
     global _candle_cache
@@ -44,12 +66,10 @@ def login():
     time.sleep(2)
     return _obj
 
-
 def load_model():
     global _model
-    _model = joblib.load("models/crossover_model.joblib")
+    _model = joblib.load(resource_path("models/crossover_model.joblib"))
     return _model
-
 
 def load_groq():
     global _groq_client
@@ -198,7 +218,42 @@ def calculate_etq_and_avg(df):
     }
 
 
-def predict_and_explain(features, symbol, signal):
+def log_live_prediction(symbol, signal, features, ml_prediction, confidence, entry_ltp, crossover_ts):
+    """
+    Appends every live crossover prediction to a CSV, including the REAL
+    entry price and REAL crossover timestamp (from the candle data itself,
+    not wall-clock time) - both are required for resolve_predictions.py to
+    correctly compute P&L and to correctly scope its search for the exit
+    crossover to only candles that occurred after this signal.
+
+    On a subsequent trading day, resolve_predictions.py looks up what
+    actually happened after each logged signal and compares it against what
+    the model predicted here - this is the next-day validation loop
+    described in the README's Future Work section.
+    """
+    entry = {
+        "logged_at": datetime.now().isoformat(),
+        "crossover_ts": crossover_ts,
+        "symbol": symbol,
+        "signal": signal,
+        "entry_ltp": entry_ltp,
+        "smma_gap_pct": round(features["smma_gap_pct"], 4),
+        "volatility": round(features["volatility"], 4),
+        "hour": features["hour"],
+        "volume_trend": round(features["volume_trend"], 4),
+        "ltq_ratio_2v5": round(features["ltq_ratio_2v5"], 4),
+        "ml_prediction": ml_prediction,
+        "confidence": confidence,
+        "actual_outcome": "",       # filled in later by resolve_predictions.py
+        "resolved": False,
+    }
+
+    file_exists = os.path.isfile(LIVE_LOG_FILE)
+    log_df = pd.DataFrame([entry])
+    log_df.to_csv(LIVE_LOG_FILE, mode="a", header=not file_exists, index=False)
+
+
+def predict_and_explain(features, symbol, signal, entry_ltp, crossover_ts):
     feature_order = ["smma_gap_pct", "volatility", "hour", "volume_trend", "ltq_ratio_2v5"]
     X = [[features[f] for f in feature_order]]
 
@@ -216,6 +271,12 @@ def predict_and_explain(features, symbol, signal):
     }
 
     explanation = generate_explanation(trade)
+
+    log_key = (symbol, str(crossover_ts))
+    if log_key not in _logged_crossovers:
+        _logged_crossovers.add(log_key)
+        log_live_prediction(symbol, signal, features, label, confidence, entry_ltp, crossover_ts)
+
     return label, confidence, explanation
 
 
@@ -339,7 +400,11 @@ def build_stock_snapshot(symbol, token, depth_info):
         features = extract_features(df, crossover["index"])
         if features:
             signal = crossover["signal"]
-            ml_pred, confidence, explanation = predict_and_explain(features, symbol, signal)
+            entry_ltp = df["close"].iloc[crossover["index"]]
+            crossover_ts = df["timestamp"].iloc[crossover["index"]]
+            ml_pred, confidence, explanation = predict_and_explain(
+                features, symbol, signal, entry_ltp, crossover_ts
+            )
 
     return {
         "Symbol": symbol,

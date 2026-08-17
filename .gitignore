@@ -7,3 +7,6 @@ dist/
 .vscode/
 venv/
 candle_cache.pkl
+logs/
+venv/
+AI_ML_Stock_Screener.spec
