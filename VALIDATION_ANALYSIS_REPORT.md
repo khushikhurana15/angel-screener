@@ -1,8 +1,6 @@
 # Validation Analysis Report
 ### AI/ML-Based Stock Market Screening and Analysis System
 
-**Prepared by:** Khushi Khurana
-**Date:** August 18, 2026
 **Repository:** https://github.com/khushikhurana15/angel-screener
 
 ---
@@ -26,7 +24,7 @@ Two separate validation methods are reported here, each with a different data so
 |---|---|---|
 | Data source | 4,815 historical crossover trades, 75 stocks, 45-day lookback | Live signals logged during actual trading sessions via Angel One SmartAPI |
 | Split method | Stock-grouped (`GroupShuffleSplit`, symbol-level, zero overlap) | Chronological — signals resolved against real subsequent price action |
-| Sample size (this report) | 1,011 signals, 15 unseen stocks | 166 unique logged signals, 59 resolved |
+| Sample size (this report) | 1,011 signals, 15 unseen stocks | 220 unique logged signals, 59 resolved |
 | What it measures | Generalization to **unseen stocks** | Generalization to **unseen future time**, on genuine live data |
 | Script | `train_model.py`, `analyze_validation.py` | `data_engine.py` (`log_live_prediction`), `resolve_predictions.py` |
 
@@ -88,21 +86,21 @@ Reproducible via `python analyze_validation.py`.
 
 | Metric | Value |
 |---|---|
-| Total live signals logged (raw) | 402 |
-| Unique signals after deduplication | 166 |
+| Total live signals logged (raw) | 516 |
+| Unique signals after deduplication | 220 |
 | Signals resolved so far (opposite crossover occurred) | 59 |
 | Resolved correctly (prediction matched actual outcome) | 22 |
 | **Resolved accuracy** | **37.3%** |
 
 ### 4.2 A bug found and fixed during this process
 
-The raw log initially contained 402 rows for only 166 distinct signals. Investigation showed the logger was re-recording the same unchanged crossover on every dashboard refresh cycle, since `find_latest_crossover()` returns the same result until a genuinely new crossover occurs. This was inflating the sample with duplicate rows and skewing the raw (undeduplicated) accuracy figure. A deduplication guard, keyed on `(symbol, crossover_timestamp)`, was added to `data_engine.py` to prevent this going forward; all figures in this report use the deduplicated data.
+The raw log initially contained 516 rows for only 220 distinct signals. Investigation showed the logger was re-recording the same unchanged crossover on every dashboard refresh cycle, since `find_latest_crossover()` returns the same result until a genuinely new crossover occurs. This was inflating the sample with duplicate rows and skewing the raw (undeduplicated) accuracy figure. A deduplication guard, keyed on `(symbol, crossover_timestamp)`, was added to `data_engine.py` to prevent this going forward; all figures in this report use the deduplicated data.
 
 ### 4.3 Honest limitations of this result
 
 - **Small sample.** At n=59, the 95% confidence interval on the true resolution accuracy is approximately ±12–13 percentage points — this number should not be treated as a precise or stable measurement.
 - **Intraday, not full-day, resolution.** Most resolved signals reversed within the same trading session (SMMA(20)/SMMA(120) crossovers are relatively slow-moving; only faster-reversing signals had resolved by the time this report was generated). This is a different, likely noisier population than the full historical daily data used in Section 3.
-- **Not directly comparable to Section 3's 75.67%/73.9% figures**, which are measured on 20x the sample size using full historical daily candle data.
+- **Not directly comparable to Section 3's 75.67%/73.9% figures**, which are measured on a much larger sample size using full historical daily candle data.
 
 This section demonstrates that the full logging-and-resolution pipeline functions correctly end-to-end on genuine live data — real entry prices, real timestamps, real subsequent outcomes — and is actively accumulating results. Given more elapsed trading days, this pipeline will produce a statistically meaningful next-day accuracy figure directly comparable to what the assignment describes.
 
